@@ -8,6 +8,8 @@
 * location
 * phone
 * age
+* created_on
+* updated_on
 * is_influencer
 
 Partitioned by `user_id`.
@@ -18,10 +20,10 @@ Partitioned by `user_id`.
 * user_id
 * post_url
 * post_type
-* post_type
 * created_on
 * updated_on
 
+Clustering key created_on desc
 Partition by `user_id`. Why?
 
 We can fetch all posts associated with the user from a single db. This will allow user to view his own posts or even when someone searches for a particular user.
