@@ -1,34 +1,62 @@
 <!-- TOC -->
-
 * [Q-1 What is Partition Tolerance?](#q-1-what-is-partition-tolerance)
 * [Q-2 What is CAP theorem?](#q-2-what-is-cap-theorem)
-    * [Why Partition Tolerance is mandatory](#why-partition-tolerance-is-mandatory)
-    * [Let’s see the choice (ELI5)](#lets-see-the-choice-eli5)
-        * [Case 1: Choose Consistency](#case-1-choose-consistency)
-        * [Case 2: Choose Availability](#case-2-choose-availability)
-    * [Important correction (many people get this wrong)](#important-correction-many-people-get-this-wrong)
-    * [Real-world mapping (intuition)](#real-world-mapping-intuition)
+  * [Why Partition Tolerance is mandatory](#why-partition-tolerance-is-mandatory)
+  * [Let’s see the choice (ELI5)](#lets-see-the-choice-eli5)
+    * [Case 1: Choose Consistency](#case-1-choose-consistency)
+    * [Case 2: Choose Availability](#case-2-choose-availability)
+  * [Important correction (many people get this wrong)](#important-correction-many-people-get-this-wrong)
+  * [Real-world mapping (intuition)](#real-world-mapping-intuition)
 * [Q-3 What are two common Replication Models?](#q-3-what-are-two-common-replication-models)
-    * [Primary–Replica (Leader–Follower)](#primaryreplica-leaderfollower)
-    * [Quorum-based Replication (Leaderless / Multi-Replica)](#quorum-based-replication-leaderless--multi-replica)
+  * [Primary–Replica (Leader–Follower)](#primaryreplica-leaderfollower)
+  * [Quorum-based Replication (Leaderless / Multi-Replica)](#quorum-based-replication-leaderless--multi-replica)
 * [Q-4 How to tune consistency in Leaderless Replication](#q-4-how-to-tune-consistency-in-leaderless-replication)
-    * [1. The Variables](#1-the-variables)
-    * [2. The Scenario: `R + W ≤ N`](#2-the-scenario-r--w--n)
-    * [3. Why would anyone do this?](#3-why-would-anyone-do-this)
-    * [4. The "Fixed" Formula (Strong Consistency)](#4-the-fixed-formula-strong-consistency)
+  * [1. The Variables](#1-the-variables)
+  * [2. The Scenario: `R + W ≤ N`](#2-the-scenario-r--w--n)
+  * [3. Why would anyone do this?](#3-why-would-anyone-do-this)
+  * [4. The "Fixed" Formula (Strong Consistency)](#4-the-fixed-formula-strong-consistency)
 * [Q-5 What are Bloom Filters?](#q-5-what-are-bloom-filters)
-    * [1. The problem (ELI5)](#1-the-problem-eli5)
-    * [2. What a Bloom Filter is (ELI5)](#2-what-a-bloom-filter-is-eli5)
-    * [3. The light-bulb board (visual example)](#3-the-light-bulb-board-visual-example)
-    * [4. Adding an item (example 1)](#4-adding-an-item-example-1)
-    * [5. Adding another item (example 2)](#5-adding-another-item-example-2)
-    * [6. Checking if an item exists (example)](#6-checking-if-an-item-exists-example)
-    * [7. Checking something that is NOT there](#7-checking-something-that-is-not-there)
-    * [8. The golden rule (important)](#8-the-golden-rule-important)
-    * [9. Why false positives are okay](#9-why-false-positives-are-okay)
-* [Q-6 What are Vector Clocks?](#q-6-what-are-vector-clocks)
-* [Q-6 What are Vector Clocks?](#q-6-what-are-vector-clocks-1)
-
+  * [1. The problem (ELI5)](#1-the-problem-eli5)
+  * [2. What a Bloom Filter is (ELI5)](#2-what-a-bloom-filter-is-eli5)
+  * [3. The light-bulb board (visual example)](#3-the-light-bulb-board-visual-example)
+  * [4. Adding an item (example 1)](#4-adding-an-item-example-1)
+  * [5. Adding another item (example 2)](#5-adding-another-item-example-2)
+  * [6. Checking if an item exists (example)](#6-checking-if-an-item-exists-example)
+  * [7. Checking something that is NOT there](#7-checking-something-that-is-not-there)
+  * [8. The golden rule (important)](#8-the-golden-rule-important)
+  * [9. Why false positives are okay](#9-why-false-positives-are-okay)
+* [Q-6 What are LSM Trees?](#q-6-what-are-lsm-trees)
+  * [Step 1: The problem LSM Trees solve (ELI5)](#step-1-the-problem-lsm-trees-solve-eli5)
+  * [Step 2: The key rule (lock this in)](#step-2-the-key-rule-lock-this-in)
+  * [Step 3: Start with memory (MemTable)](#step-3-start-with-memory-memtable)
+    * [MemTable (sorted in RAM)](#memtable-sorted-in-ram)
+  * [Step 4: MemTable fills up → flush to disk](#step-4-memtable-fills-up--flush-to-disk)
+  * [Step 5: First SSTable on disk](#step-5-first-sstable-on-disk)
+  * [Step 6: More writes come in](#step-6-more-writes-come-in)
+  * [Step 7: Flush again → another SSTable](#step-7-flush-again--another-sstable)
+  * [Step 8: How READ works (very important)](#step-8-how-read-works-very-important)
+  * [Step 9: Bloom Filters help speed reads](#step-9-bloom-filters-help-speed-reads)
+  * [Step 10: Deletes (tombstones)](#step-10-deletes-tombstones)
+  * [Step 11: Problem: Too many SSTables](#step-11-problem-too-many-sstables)
+  * [Step 12: Compaction (cleanup)](#step-12-compaction-cleanup)
+  * [Step 13: Why LSM Trees are fast](#step-13-why-lsm-trees-are-fast)
+  * [Step 14: One-sentence ELI5 summary (memorize this)](#step-14-one-sentence-eli5-summary-memorize-this)
+* [Q-6 MemTable and SSTable: Structure and Layout](#q-6-memtable-and-sstable-structure-and-layout)
+  * [What a MemTable looks like (in memory)](#what-a-memtable-looks-like-in-memory)
+    * [How it’s actually implemented](#how-its-actually-implemented)
+    * [What happens on write](#what-happens-on-write)
+  * [2. What happens when MemTable is flushed](#2-what-happens-when-memtable-is-flushed)
+  * [3. What an SSTable looks like (on disk)](#3-what-an-sstable-looks-like-on-disk)
+    * [SSTable (high-level layout)](#sstable-high-level-layout)
+    * [3.1 Data Blocks (the actual data)](#31-data-blocks-the-actual-data)
+    * [3.2 Index Block (how SSTable is searched)](#32-index-block-how-sstable-is-searched)
+    * [3.3 Bloom Filter (quick "not here" check)](#33-bloom-filter-quick-not-here-check)
+    * [3.4 Footer](#34-footer)
+  * [4. SSTable example (full picture)](#4-sstable-example-full-picture)
+  * [5. How reads actually happen (step-by-step)](#5-how-reads-actually-happen-step-by-step)
+  * [6. Deletes (tombstones) in MemTable and SSTable](#6-deletes-tombstones-in-memtable-and-sstable)
+  * [7. Key difference (very important)](#7-key-difference-very-important)
+* [Q-7 What are Vector Clocks?](#q-7-what-are-vector-clocks)
 <!-- TOC -->
 
 # Q-1 What is Partition Tolerance?
@@ -411,9 +439,481 @@ So Bloom Filters trade:
 * tiny uncertainty
 * for huge speed gains
 
-# Q-6 What are Vector Clocks?
+# Q-6 What are LSM Trees?
 
-# Q-6 What are Vector Clocks?
+## Step 1: The problem LSM Trees solve (ELI5)
+
+Imagine you keep a notebook on disk.
+
+Every time you want to update a value, you must:
+
+* open the notebook
+* erase a line
+* rewrite it
+
+Disk hates this.
+
+
+So databases asked:
+
+> "What if we never erase and only append?"
+
+That idea leads to **LSM Trees**.
+
+## Step 2: The key rule (lock this in)
+
+> Never update data in place. Always write new data.
+>
+
+Old data stays. New data is written on top.
+
+## Step 3: Start with memory (MemTable)
+
+When a write comes in:
+
+```text
+PUT(cat, 10)
+PUT(dog, 20)
+PUT(apple, 5)
+```
+
+Instead of disk, we write to memory.
+
+### MemTable (sorted in RAM)
+
+```text
+apple → 5
+cat   → 10
+dog   → 20
+```
+
+Fast. No disk yet.
+
+##  Step 4: MemTable fills up → flush to disk
+
+Memory is limited.
+
+When MemTable is full:
+
+* freeze it
+* write it to disk
+* start a new MemTable
+
+The disk file is called an SSTable.
+
+
+## Step 5: First SSTable on disk
+
+```text
+SSTable_1 (on disk)
+------------------
+apple → 5
+cat   → 10
+dog   → 20
+```
+
+Important:
+
+* Sorted
+* Immutable (never changes)
+
+
+## Step 6: More writes come in
+
+Now we write more data:
+
+```text
+PUT(cat, 15)   // update
+PUT(egg, 3)
+```
+
+New MemTable:
+
+```text
+cat → 15
+egg → 3
+```
+
+## Step 7: Flush again → another SSTable
+
+```text
+SSTable_2 (newer)
+-----------------
+cat → 15
+egg → 3
+```
+
+Disk now has:
+
+```text
+SSTable_2 (newest)
+SSTable_1 (older)
+```
+
+## Step 8: How READ works (very important)
+
+Suppose we do:
+
+```text
+GET(cat)
+```
+
+Database checks:
+
+* MemTable (if exists)
+* SSTable_2
+* SSTable_1
+
+Finds:
+
+```text
+cat → 15
+```
+
+Stops immediately. 
+
+Newer data always wins.
+
+
+## Step 9: Bloom Filters help speed reads
+
+Before reading an SSTable:
+
+* Bloom Filter says:
+    * ❌ "Not here" → skip
+    * 🤔 "Maybe here" → check
+
+So we don't scan every file.
+
+
+## Step 10: Deletes (tombstones)
+
+If you do:
+
+```text
+DELETE(dog)
+```
+
+LSM writes:
+
+```text
+dog → TOMBSTONE
+```
+
+Later SSTable:
+
+```text
+SSTable_3
+---------
+dog → <deleted>
+```
+
+This hides old values.
+
+## Step 11: Problem: Too many SSTables
+
+Over time:
+
+* Many SSTables
+* Reads get slower
+* Disk usage grows
+
+## Step 12: Compaction (cleanup)
+
+Background process:
+
+1. Read multiple SSTables
+2. Merge them (like merge sort)
+3. Keep only latest value per key
+4. Remove tombstones
+5. Write a new SSTable
+
+Example:
+
+Before compaction:
+
+```text
+SSTable_2: cat → 15
+SSTable_1: cat → 10
+```
+
+After:
+
+```text
+SSTable_compacted: cat → 15
+```
+
+Old files are deleted.
+
+
+## Step 13: Why LSM Trees are fast
+
+Writes:
+
+* In-memory
+* Sequential disk writes
+* No random IO
+
+Reads:
+
+* More complex
+* Fixed by Bloom filters + compaction
+
+LSM trades:
+
+> Write speed for read complexity
+
+## Step 14: One-sentence ELI5 summary (memorize this)
+
+> An LSM Tree stores new data in memory, writes it to disk as immutable sorted files, and later merges 
+> those files to keep reads fast.
+
+# Q-6 MemTable and SSTable: Structure and Layout
+
+## What a MemTable looks like (in memory)
+
+A MemTable is just an in-memory sorted map.
+
+Think of it as:
+
+```text
+SortedMap<Key, Value>
+```
+
+Example: MemTable contents
+
+```text
+MemTable
+--------
+apple   → 10
+banana  → 20
+cat     → 30
+dog     → 40
+```
+
+Important properties:
+
+* Sorted by key
+* Lives entirely in RAM
+* Mutable (can change)
+* Fast inserts and updates
+
+### How it’s actually implemented
+
+In real systems (RocksDB, Cassandra):
+
+* Skip List (most common)
+* Red-Black Tree
+* AVL Tree
+
+You don't need to know how its implemented — the key point is:
+> Keys are always kept sorted.
+
+### What happens on write
+
+```text
+PUT(cat, 99)
+```
+
+MemTable becomes:
+
+```text
+apple   → 10
+banana  → 20
+cat     → 99   (newer value)
+dog     → 40
+```
+
+No disk touched yet.
+
+## 2. What happens when MemTable is flushed
+
+When MemTable gets full:
+
+* It is frozen (read-only)
+* Written to disk
+* Turned into an `SSTable`
+
+
+## 3. What an SSTable looks like (on disk)
+
+An SSTable is **immutable** and **sorted**.
+
+But it’s not just a flat file. It has **structure**.
+
+### SSTable (high-level layout)
+
+```text
++--------------------+
+| Data Blocks        |
++--------------------+
+| Index Block        |
++--------------------+
+| Bloom Filter       |
++--------------------+
+| Footer             |
++--------------------+
+```
+
+Let's go piece by piece.
+
+### 3.1 Data Blocks (the actual data)
+
+Data is stored in **blocks**, not one giant list.
+
+Example:
+
+```text
+Data Block 1
+------------
+apple  → 10
+banana → 20
+
+Data Block 2
+------------
+cat → 99
+dog → 40
+```
+
+Properties:
+
+* Sorted within the block
+* Fixed-size (e.g., 4 KB)
+* Read sequentially from disk
+
+
+### 3.2 Index Block (how SSTable is searched)
+
+The index tells you which block to read.
+
+Example:
+
+```text
+Index Block
+-----------
+apple → Block 1
+cat   → Block 2
+```
+
+Meaning:
+
+* If key < cat → look in Block 1
+* Else → Block 2
+
+This avoids scanning the whole file.
+
+
+### 3.3 Bloom Filter (quick "not here" check)
+
+Each SSTable has a Bloom filter.
+
+Example logic:
+
+```text
+GET("elephant")
+Bloom Filter → definitely NOT present
+→ skip this SSTable entirely
+```
+
+This avoids disk reads.
+
+### 3.4 Footer
+
+Stores:
+
+* Pointers to index
+* Metadata
+* Version info
+
+Used when opening the file.
+
+
+## 4. SSTable example (full picture)
+
+```text
+SSTable-42
+----------
+Data Blocks:
+  [apple → 10, banana → 20]
+  [cat → 99, dog → 40]
+
+Index:
+  apple → block-0
+  cat   → block-1
+
+Bloom Filter:
+  bits = 101011001...
+
+Footer:
+  index_offset = 8192
+```
+
+Once written:
+
+* ❌ Cannot be modified
+* ❌ Cannot be appended
+* ✅ Can be read efficiently
+
+
+## 5. How reads actually happen (step-by-step)
+
+Let's do:
+
+```text
+GET(cat)
+```
+
+**Step 1: Check MemTable**
+
+* If found → return immediately
+
+**Step 2: Check newest SSTable**
+
+* Bloom filter → maybe present
+* Index → find correct block
+* Read block → binary search inside block
+
+**Step 3: Stop at first match**
+
+* Newest value wins
+
+
+## 6. Deletes (tombstones) in MemTable and SSTable
+
+Delete is just another entry.
+
+**MemTable after delete**
+
+```text
+cat → TOMBSTONE
+```
+
+**SSTable on disk**
+
+```text
+SSTable on disk
+```
+
+
+
+During compaction:
+
+* Older values are removed
+* Tombstone may disappear
+
+
+## 7. Key difference (very important)
+
+| MemTable      | SSTable               |
+|---------------|-----------------------|
+| In memory     | On disk               |
+| Mutable       | Immutable             |
+| Fast writes   | Fast sequential reads |
+| One at a time | Many files            |
+| Temporary     | Long-lived            |
+
+
+# Q-7 What are Vector Clocks?
 
 1. db isolation level
 1. normal forms
