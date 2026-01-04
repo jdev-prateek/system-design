@@ -41,7 +41,7 @@
   * [Step 12: Compaction (cleanup)](#step-12-compaction-cleanup)
   * [Step 13: Why LSM Trees are fast](#step-13-why-lsm-trees-are-fast)
   * [Step 14: One-sentence ELI5 summary (memorize this)](#step-14-one-sentence-eli5-summary-memorize-this)
-* [Q-6 MemTable and SSTable: Structure and Layout](#q-6-memtable-and-sstable-structure-and-layout)
+* [Q-7 MemTable and SSTable: Structure and Layout](#q-7-memtable-and-sstable-structure-and-layout)
   * [What a MemTable looks like (in memory)](#what-a-memtable-looks-like-in-memory)
     * [How it’s actually implemented](#how-its-actually-implemented)
     * [What happens on write](#what-happens-on-write)
@@ -700,7 +700,7 @@ LSM trades:
 > An LSM Tree stores new data in memory, writes it to disk as immutable sorted files, and later merges 
 > those files to keep reads fast.
 
-# Q-6 MemTable and SSTable: Structure and Layout
+# Q-7 MemTable and SSTable: Structure and Layout
 
 ## What a MemTable looks like (in memory)
 
