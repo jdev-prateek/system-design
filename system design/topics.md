@@ -56,6 +56,26 @@
   * [5. How reads actually happen (step-by-step)](#5-how-reads-actually-happen-step-by-step)
   * [6. Deletes (tombstones) in MemTable and SSTable](#6-deletes-tombstones-in-memtable-and-sstable)
   * [7. Key difference (very important)](#7-key-difference-very-important)
+* [Q-8 What is Consistent hashing?](#q-8-what-is-consistent-hashing)
+  * [Consistent hashing: the core idea](#consistent-hashing-the-core-idea)
+  * [The hash space (horizontal line)](#the-hash-space-horizontal-line)
+  * [Place shards on the line](#place-shards-on-the-line)
+  * [Place keys on the same line](#place-keys-on-the-same-line)
+  * [Assign keys to shards (very important)](#assign-keys-to-shards-very-important)
+  * [Adding a shard (this is where consistent hashing shines)](#adding-a-shard-this-is-where-consistent-hashing-shines)
+  * [So far so good… but here's the problem](#so-far-so-good-but-heres-the-problem)
+  * [Enter virtual nodes (this is the key)](#enter-virtual-nodes-this-is-the-key)
+  * [Setup: hash space and virtual nodes](#setup-hash-space-and-virtual-nodes)
+  * [Ownership rule (recap)](#ownership-rule-recap)
+  * [Initial ownership ranges](#initial-ownership-ranges)
+  * [Add a new physical node D](#add-a-new-physical-node-d)
+  * [What moves when node D is added?](#what-moves-when-node-d-is-added)
+  * [Ownership after adding D](#ownership-after-adding-d)
+  * [Remove physical node B](#remove-physical-node-b)
+  * [What happens to B’s ranges?](#what-happens-to-bs-ranges)
+  * [Why virtual nodes make this smooth](#why-virtual-nodes-make-this-smooth)
+  * [Key insight (this is the “aha”)](#key-insight-this-is-the-aha)
+* [Q-9 What is Gossip Protocol?](#q-9-what-is-gossip-protocol)
 * [Q-7 What are Vector Clocks?](#q-7-what-are-vector-clocks)
 <!-- TOC -->
 
@@ -912,6 +932,349 @@ During compaction:
 | One at a time | Many files            |
 | Temporary     | Long-lived            |
 
+
+
+# Q-8 What is Consistent hashing?
+
+Imagine you have 10,000 users and 3 servers.
+
+You need to decide:
+
+> "Which user goes to which server?"
+>
+
+Naive idea (bad)
+
+Use:
+
+```text
+userId % numberOfServers
+```
+
+If servers = 3 → works.
+
+But now one server crashes and servers = 2.
+
+💥 Disaster
+
+Almost every user moves to a different server.
+
+That means:
+
+* Cache misses
+* Data reshuffling
+* Massive load spike
+
+What problem Consistent Hashing solves
+> When servers are added or removed, only a small portion of keys should move.
+>
+
+That's it. That’s the whole reason it exists.
+
+## Consistent hashing: the core idea
+
+Instead of mapping **keys to shard numbers**, we map:
+
+* shards → positions on a number line
+* keys → positions on the same number line
+
+Then we use a simple rule:
+> A key goes to the next shard on the right.
+
+That's it.
+
+## The hash space (horizontal line)
+
+Assume a hash space from 0 to 99 (small for clarity):
+
+```text
+0 ------------------------------------------------------------ 99
+```
+
+This line wraps around:
+* after 99 comes 0 again
+
+## Place shards on the line
+
+Suppose we have 3 shards.
+
+We hash each shard’s ID and place it on the line:
+
+```text
+0 ------------------------------------------------------------ 99
+|            |                      |
+S1(10)       S2(40)                 S3(70)
+```
+
+Each shard "owns" keys to its left, up to the previous shard.
+
+
+## Place keys on the same line
+
+Now hash some keys:
+
+```text
+apple  → 12
+cat    → 35
+dog    → 55
+zebra  → 90
+```
+
+```text
+0 ------------------------------------------------------------ 99
+|            |                      |
+S1(10)       S2(40)                 S3(70)
+
+     apple(12)  cat(35)   dog(55)           zebra(90)
+```
+
+## Assign keys to shards (very important)
+
+Rule again:
+
+> Key goes to the next shard on the right
+
+| Key   | Hash | Assigned shard        |
+|-------|------|-----------------------|
+| apple | 12   | S2 (40)               |
+| cat   | 35   | S2 (40)               |
+| dog   | 55   | S3 (70)               |
+| zebra | 90   | S1 (10) ← wrap around |
+
+So shard ownership is:
+
+```text
+S1 owns (70 → 10]
+S2 owns (10 → 40]
+S3 owns (40 → 70]
+```
+
+
+## Adding a shard (this is where consistent hashing shines)
+
+Now add S4, hashed to position 50.
+
+```text
+0 ------------------------------------------------------------ 99
+|            |          |          |
+S1(10)       S2(40)     S4(50)     S3(70)
+```
+
+What changes?
+
+Only keys in one small range move:
+
+```text
+(40 → 50]
+```
+
+These keys move:
+
+* from S3
+* to S4
+
+All other keys stay where they are.
+
+* ✅ This is minimal movement
+* ❌ No massive reshuffle
+
+## So far so good… but here's the problem
+
+What if shard positions are uneven?
+
+Example:
+
+```text
+0 ------------------------------------------------------------ 99
+|    |                                   |
+S1(5) S2(15)                             S3(90)
+```
+
+Now:
+
+* S3 owns a huge range
+* S1 and S2 own tiny ranges
+
+Result:
+
+* one shard overloaded
+* others idle
+
+This happens because:
+* Shard positions are random
+
+
+## Enter virtual nodes (this is the key)
+
+Instead of placing **one point per shard**, we place **many points per shard**.
+
+These points are called **virtual nodes (vnodes)**.
+
+
+## Setup: hash space and virtual nodes
+
+Assume hash space 0–99.
+
+We have 3 physical nodes, each with 3 virtual nodes.
+
+Initial placement
+
+```text
+0 -------------------------------------------------------------------------------- 99
+
+10     18     25     38     45     55     68     75     88
+|      |      |      |      |      |      |      |      |
+A1     B1     C1     A2     B2     C2     A3     B3     C3
+```
+
+Legend:
+
+* `A1, A2, A3` → physical node A
+* `B1, B2, B3` → physical node B
+* `C1, C2, C3` → physical node C
+
+## Ownership rule (recap)
+
+> A key goes to the **next virtual node on the right**
+(wrap around at 99 → 0)
+
+Each virtual node owns the range from the previous vnode (exclusive) to itself (inclusive).
+
+
+## Initial ownership ranges
+
+Let's list them clearly:
+
+```text
+| Range     | Virtual Node | Physical Node |
+| --------- | ------------ | ------------- |
+| (88 → 10] | A1           | A             |
+| (10 → 18] | B1           | B             |
+| (18 → 25] | C1           | C             |
+| (25 → 38] | A2           | A             |
+| (38 → 45] | B2           | B             |
+| (45 → 55] | C2           | C             |
+| (55 → 68] | A3           | A             |
+| (68 → 75] | B3           | B             |
+| (75 → 88] | C3           | C             |
+```
+
+Each physical node owns **three small ranges**, spread across the space.
+
+Balanced load.
+
+## Add a new physical node D
+
+Node D joins with 3 virtual nodes:
+
+```text
+D1 = 15
+D2 = 50
+D3 = 82
+```
+
+**New layout**
+
+```text
+0 -------------------------------------------------------------------------------- 99
+
+10  15  18  25  38  45  50  55  68  75  82  88
+|   |   |   |   |   |   |   |   |   |   |   |
+A1  D1  B1  C1  A2  B2  D2  C2  A3  B3  D3  C3
+```
+
+## What moves when node D is added?
+
+**Rule:**
+Only ranges **immediately before D's virtual nodes** move.
+
+**Affected ranges**
+
+| New vnode | Range taken | Taken from |
+|-----------|-------------|------------|
+| D1(15)    | (10 → 15]   | A          |
+| D2(50)    | (45 → 50]   | B          |
+| D3(82)    | (75 → 82]   | B          |
+
+
+Everything else stays exactly the same.
+
+## Ownership after adding D
+
+Now node D owns:
+
+* `(10 → 15]`
+* `(45 → 50]`
+* `(75 → 82]`
+
+Each existing node:
+
+* loses small slices
+* not a big chunk
+
+This is the **core benefit of virtual nodes**.
+
+
+## Remove physical node B
+
+Node B goes down → all its virtual nodes disappear:
+
+```text
+B1(18), B2(45), B3(75)
+```
+
+New layout after removal
+
+```text
+0 -------------------------------------------------------------------------------- 99
+
+10  15  25  38  50  55  68  82  88
+|   |   |   |   |   |   |   |   |
+A1  D1  C1  A2  D2  C2  A3  D3  C3
+```
+
+
+## What happens to B’s ranges?
+
+Each range owned by B is taken over by the next vnode.
+
+| Old B range | New owner |
+|-------------|-----------|
+| (10 → 18]   | C1        |
+| (38 → 45]   | D2        |
+| (68 → 75]   | D3        |
+
+Again:
+
+* no global reshuffle
+* only local reassignment
+
+## Why virtual nodes make this smooth
+
+Without virtual nodes:
+
+* Node B might own 40% of the data
+* Removing B would overload one node
+
+With virtual nodes:
+
+* Node B owned many small slices
+* Those slices are spread across:
+    * A
+    * C
+    * D
+
+Load redistribution is **even**.
+
+## Key insight (this is the “aha”)
+
+> Virtual nodes turn big, dangerous rebalances into many tiny, safe ones.
+
+They are not an optimization.
+
+They are what makes consistent hashing usable in production.
+
+# Q-9 What is Gossip Protocol?
 
 # Q-7 What are Vector Clocks?
 
