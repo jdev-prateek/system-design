@@ -76,6 +76,18 @@
   * [Why virtual nodes make this smooth](#why-virtual-nodes-make-this-smooth)
   * [Key insight (this is the “aha”)](#key-insight-this-is-the-aha)
 * [Q-9 What is Gossip Protocol?](#q-9-what-is-gossip-protocol)
+  * [Step 0: Bootstrap (master list loaded)](#step-0-bootstrap-master-list-loaded)
+  * [Step 1: Node A starts](#step-1-node-a-starts)
+  * [Step 2: A picks initial peers](#step-2-a-picks-initial-peers)
+  * [Step 3: A contacts C and E](#step-3-a-contacts-c-and-e)
+  * [Step 4: What do C and E know at this moment?](#step-4-what-do-c-and-e-know-at-this-moment)
+  * [Step 5: C and E reply to A (this is the key fix)](#step-5-c-and-e-reply-to-a-this-is-the-key-fix)
+  * [Step 6: A’s state after first gossip round](#step-6-as-state-after-first-gossip-round)
+  * [Step 7: Next gossip round (time passes)](#step-7-next-gossip-round-time-passes)
+  * [Step 8: A contacts B for the first time](#step-8-a-contacts-b-for-the-first-time)
+  * [Step 9: A merges again](#step-9-a-merges-again)
+  * [Step 10: How D is eventually discovered (or marked dead)](#step-10-how-d-is-eventually-discovered-or-marked-dead)
+  * [One-sentence corrected summary](#one-sentence-corrected-summary)
 * [Q-7 What are Vector Clocks?](#q-7-what-are-vector-clocks)
 <!-- TOC -->
 
@@ -1275,6 +1287,185 @@ They are not an optimization.
 They are what makes consistent hashing usable in production.
 
 # Q-9 What is Gossip Protocol?
+
+## Step 0: Bootstrap (master list loaded)
+
+Every node is deployed with the same **static bootstrap list**:
+
+```text
+BOOTSTRAP_LIST = [A, B, C, D, E]
+```
+
+Important:
+
+* This list is just addresses
+* It does NOT mean nodes know each other's state
+* No node has talked to anyone yet
+
+## Step 1: Node A starts
+
+Initial state of A:
+
+```text
+A knows: [A]          // only itself
+A has addresses for: [B, C, D, E]   // from bootstrap
+```
+
+A does NOT yet know:
+
+* who is alive
+* who is reachable
+* who is dead
+
+
+## Step 2: A picks initial peers
+
+Rule:
+
+> Pick `k` random nodes from bootstrap list (excluding itself)
+
+Assume `k = 2`.
+
+A picks:
+
+```text
+C, E
+```
+
+## Step 3: A contacts C and E
+
+A sends join / gossip messages:
+
+```text
+A → C : "Hi, I am A. This is what I know: [A]"
+A → E : "Hi, I am A. This is what I know: [A]"
+```
+
+## Step 4: What do C and E know at this moment?
+
+Now assume:
+
+* C is already running
+* E is already running
+* B and D may or may not be running (unknown)
+
+Initial state of C (before reply):
+
+```text
+C knows: [C]
+C has addresses for: [A, B, D, E]
+```
+
+Initial state of E (before reply):
+
+```text
+E knows: [E]
+E has addresses for: [A, B, C, D]
+```
+
+## Step 5: C and E reply to A (this is the key fix)
+
+They reply with their **current knowledge**, not the full bootstrap list.
+
+So replies are:
+
+```text
+C → A : membership = [C]
+E → A : membership = [E]
+```
+
+Now A merges the information.
+
+## Step 6: A’s state after first gossip round
+
+After merging:
+
+```text
+A knows: [A, C, E]
+```
+
+
+
+That's it.
+
+A does NOT magically learn about B or D yet.
+
+## Step 7: Next gossip round (time passes)
+
+A runs gossip again.
+
+From what it knows:
+
+```text
+Known alive candidates = [C, E]
+Known addresses = [B, C, D, E]
+```
+
+A randomly picks peers again (excluding itself).
+
+Assume:
+
+```text
+A picks → C, B
+```
+
+## Step 8: A contacts B for the first time
+
+```text
+A → B : "Hi, I am A. I know [A, C, E]"
+```
+
+Assume B is alive.
+
+State of B before reply:
+
+```text
+B knows: [B]
+```
+
+B replies:
+
+```text
+B → A : membership = [B]
+```
+
+## Step 9: A merges again
+
+Now A knows:
+
+```text
+A knows: [A, B, C, E]
+```
+
+Still no D.
+
+
+## Step 10: How D is eventually discovered (or marked dead)
+
+Two possibilities:
+
+**Case 1: D is alive**
+
+* Someone eventually contacts D
+* D replies
+* D is added to membership
+* Gossip spreads D’s existence
+
+**Case 2: D is dead**
+
+* Multiple nodes try contacting D
+* No response
+* D is marked suspect
+* Suspicion spreads via gossip
+* D is marked dead
+
+In both cases, the system converges.
+
+## One-sentence corrected summary
+
+A node starts with only addresses, learns about live peers incrementally through gossip exchanges, and builds 
+its membership view over multiple rounds—never instantly.
+
 
 # Q-7 What are Vector Clocks?
 
