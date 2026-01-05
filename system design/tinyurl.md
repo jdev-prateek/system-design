@@ -1,3 +1,106 @@
+<!-- TOC -->
+  * [Core Components of the URL Shortener](#core-components-of-the-url-shortener)
+    * [1. Generation Phase (The "Factory")](#1-generation-phase-the-factory)
+    * [2. Replenishment Phase (The "Bridge")](#2-replenishment-phase-the-bridge)
+    * [3. Buffering Phase (The "Hot Cache")](#3-buffering-phase-the-hot-cache)
+    * [4. Consumption Phase (The "Checkout")](#4-consumption-phase-the-checkout)
+  * [Estimation](#estimation)
+  * [keys-db schema](#keys-db-schema)
+  * [Key generation service](#key-generation-service)
+  * [key-sync service](#key-sync-service)
+  * [mapping-service](#mapping-service)
+  * [users table](#users-table)
+  * [urls table](#urls-table)
+  * [Caching](#caching)
+  * [v3](#v3)
+    * [Step-by-Step:](#step-by-step)
+  * [Use a single db to store all unique ids along with status (used or unused).](#use-a-single-db-to-store-all-unique-ids-along-with-status-used-or-unused)
+    * [keys table](#keys-table)
+    * [Key generation service](#key-generation-service-1)
+<!-- TOC -->
+
+## Core Components of the URL Shortener
+
+### 1. Generation Phase (The "Factory")
+
+* **Process:** A standalone background service (`Key-Gen Service`) continuously generates random 7-character 
+strings (using Base62 or Base64 encoding).
+* **Storage:** It inserts these strings into the `keys_db` (a relational database like PostgreSQL/MySQL).
+* **Uniqueness Guarantee:** The database table has a **Unique Constraint** on the key column.
+    * If the service generates a duplicate, the DB throws a `DuplicateKeyException`.
+    * The service catches this exception, ignores it, and generates a new key.
+* **Role:** This acts as Cold Storage. It holds the massive inventory (e.g., millions/billions of keys) on disk, which
+is cheap but slow to access randomly.
+* **SPOF Analysis:**
+    * Service: No SPOF. You can run multiple instances of the `Key-Gen service`.
+    * Database: The `keys_db` is a potential SPOF.
+    * Mitigation: Use Primary-Standby Replication. If the Primary fails, the Standby takes over. 
+    (Note: Since this is an "offline" process, a short downtime is acceptable as long as the Redis buffer isn't empty).
+
+
+### 2. Replenishment Phase (The "Bridge")
+
+* **Process:** The `Key-Sync Service` acts as a bridge between the slow DB and fast Redis. 
+It runs periodically (or triggers when Redis is low).
+* **The Critical Command:** It executes a transaction that fetches and removes keys in one go:
+    ```sql
+    DELETE FROM keys_db 
+    WHERE id IN (
+        SELECT id FROM keys_db 
+        LIMIT 1000 
+        FOR UPDATE SKIP LOCKED
+    ) 
+    RETURNING unique_id;
+    ```
+* **Why FOR UPDATE SKIP LOCKED?**
+    * This instructs the DB: "Lock these 1,000 rows. If another transaction has already locked some rows, skip them
+    and find the next free 1,000."
+    * **Benefit:** This allows you to run multiple instances of the `Key-Sync Service` in parallel. They will never 
+    fetch the same keys, and they will never block each other waiting for locks.
+* **Why Delete immediately?**
+    * We treat the DB as a "One-Time Dispenser." Once a key is picked up by the Sync Service, it must cease to 
+     exist in the DB to prevent any future possibility of reuse (Double Spending).
+* **SPOF Analysis:**
+    * **Service:** No SPOF. Multiple instances can run safely due to `SKIP LOCKED`.
+
+### 3. Buffering Phase (The "Hot Cache")
+
+* **Process:** The `Key-Sync Service` takes the batch of keys (in memory) and pushes them to Redis.
+* **Redis Command:** `RPUSH available_keys "abc1" "abc2" "abc3" ...`
+* **Architecture:**
+    * The service connects to the Redis Primary.
+    * We use a List data structure (`available_keys`) to act as a First-In-First-Out (FIFO) queue.
+* **SPOF Analysis:**
+    * **Redis Node:** A single Redis instance is a major SPOF. If it dies, the URL creation feature stops.
+    * **Mitigation:** Use **Redis Sentinel** (1 Primary + 2 Replicas). Sentinel monitors the Primary. If it crashes, 
+    Sentinel automatically promotes a Replica to be the new Primary.
+    * **Data Loss Risk:** If the Primary crashes after receiving keys but before replicating them, those keys are lost. 
+    **This is acceptable collateral damage**. Losing 1,000 keys out of 4 Trillion is better than system downtime.
+
+### 4. Consumption Phase (The "Checkout")
+
+* **Process:** The User-Facing Mapping Service receives a request to shorten a URL.
+* **Step A: Fetch Unique ID (The "Read" / "Pop")**
+    * Command: `LPOP available_keys` sent to Redis Primary.
+    * Result: Redis atomically removes the top item and returns it.
+    * Latency: Sub-millisecond (Memory operation).
+    * Concurrency: Redis is single-threaded for commands. If 10,000 users hit `LPOP` at once, Redis serves them one 
+    by one sequentially. No collisions possible.
+* **Step B:** Persist Mapping (The "Write")
+    * The service inserts the final record into the main `urls_db`:
+        ```sql
+        INSERT INTO urls (unique_id, original_url, user_id) 
+        VALUES ('abc1', 'google.com', 101);
+        ``` 
+* **SPOF Analysis:**
+    * **Mapping Service:** No SPOF (Stateless, behind a Load Balancer).
+    * **URLs DB:** A single DB is a SPOF and a bottleneck.
+    * **Mitigation:** Sharding. The `urls_db` will be sharded (likely by `unique_id` or `user_id`) to handle the 16TB+ data load 
+    and high write throughput.
+
+
+## Estimation
+
 This is read heavy system with i.e. R:W = 5:1
 
 Assume we generate 2B urls every year:
