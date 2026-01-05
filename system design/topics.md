@@ -280,7 +280,7 @@ What happens?
 
 * **The Write:** You write "The sky is Green" into **Notebook A**. (You ignore B and C because `W=1`).
 * **The Read:** Your friend comes along and picks **Notebook C** to read (`R=1`).
-    * **The Result:** Notebook C is blank (or says "The sky is Blue"). Your friend sees stale (old) data.
+* **The Result:** Notebook C is blank (or says "The sky is Blue"). Your friend sees stale (old) data.
 
 ## 3. Why would anyone do this?
 
