@@ -1,7 +1,7 @@
 <!-- TOC -->
 * [How to Design a Distributed Messaging System like Kafka?](#how-to-design-a-distributed-messaging-system-like-kafka)
   * [Resources](#resources)
-  * [High-Level Architecture](#high-level-architecture)
+  * [High-Level Components](#high-level-components)
   * [Step 0: What we are trying to store (clarify the object)](#step-0-what-we-are-trying-to-store-clarify-the-object)
   * [Step 1: Topic as a logical namespace](#step-1-topic-as-a-logical-namespace)
   * [Step 2: Why a topic cannot be a single file](#step-2-why-a-topic-cannot-be-a-single-file)
@@ -78,6 +78,31 @@
     * [Step 14.10: Failure handling](#step-1410-failure-handling)
     * [Step 14.11: Why Kafka chose this model](#step-1411-why-kafka-chose-this-model)
     * [One-sentence summary (memorize)](#one-sentence-summary-memorize-5)
+  * [ZooKeeper and Controller in Kafka](#zookeeper-and-controller-in-kafka)
+    * [Big Picture (start here)](#big-picture-start-here)
+    * [ZooKeeper — What it REALLY is (ELI5)](#zookeeper--what-it-really-is-eli5)
+    * [What Kafka stores in ZooKeeper](#what-kafka-stores-in-zookeeper)
+    * [❌ What ZooKeeper never stores (very important)](#-what-zookeeper-never-stores-very-important)
+    * [Controller — What it REALLY is (ELI5)](#controller--what-it-really-is-eli5)
+    * [What the Controller DOES](#what-the-controller-does)
+    * [What the Controller does NOT do](#what-the-controller-does-not-do)
+    * [ZooKeeper vs Controller (mental model)](#zookeeper-vs-controller-mental-model)
+    * [End-to-End Failure Scenario (ELI5)](#end-to-end-failure-scenario-eli5)
+    * [Why this design is GOOD (interview insight)](#why-this-design-is-good-interview-insight)
+    * [Common Interview Traps (avoid these)](#common-interview-traps-avoid-these)
+    * [One-Sentence Summary (memorize)](#one-sentence-summary-memorize-6)
+  * [Storing Metadata in ZooKeeper view](#storing-metadata-in-zookeeper-view)
+    * [1 How partition metadata is REALLY stored (ZooKeeper view)](#1-how-partition-metadata-is-really-stored-zookeeper-view)
+    * [2. How broker liveness is stored](#2-how-broker-liveness-is-stored)
+    * [3. Where the Controller fits in (important)](#3-where-the-controller-fits-in-important)
+    * [4. Do producers read ZooKeeper directly?](#4-do-producers-read-zookeeper-directly)
+    * [5. Then how does a producer find the leader?](#5-then-how-does-a-producer-find-the-leader)
+    * [6. What happens when leader changes?](#6-what-happens-when-leader-changes)
+    * [7. Final mental model (lock this in)](#7-final-mental-model-lock-this-in)
+    * [One-sentence interview answer (memorize)](#one-sentence-interview-answer-memorize)
+  * [What's the format of Log Files](#whats-the-format-of-log-files)
+    * [1. What is the actual format of partition log files?](#1-what-is-the-actual-format-of-partition-log-files)
+    * [2. Where is the offset stored after a leader writes a message?](#2-where-is-the-offset-stored-after-a-leader-writes-a-message)
 <!-- TOC -->
 
 # How to Design a Distributed Messaging System like Kafka?
@@ -88,7 +113,14 @@
 * [Kafka: How to Design a Distributed Messaging System?](https://www.designgurus.io/course-play/grokking-the-advanced-system-design-interview/doc/messaging-systems-introduction)
 
 
-## High-Level Architecture
+## High-Level Components
+
+1. Topic vs Partition
+2. Write Path (Producer → Leader)
+3. Storage Format
+4. Replication & ISR
+5. Safety: High-Water Mark & ACKs
+6. Metadata, ZooKeeper & Controller
 
 ## Step 0: What we are trying to store (clarify the object)
 
@@ -1430,3 +1462,557 @@ Cost:
 > 
 
 
+## ZooKeeper and Controller in Kafka
+
+### Big Picture (start here)
+
+Kafka is a distributed system, so it needs two things:
+
+1. A shared source of truth about the cluster
+2. A decision-maker to act when things change
+
+Kafka solves this by splitting responsibilities:
+
+| Component                       | Role                                |
+|---------------------------------|-------------------------------------|
+| **ZooKeeper**                   | Stores cluster state                |
+| **Controller (a Kafka broker)** | Makes decisions based on that state |
+
+
+### ZooKeeper — What it REALLY is (ELI5)
+
+> ZooKeeper is a highly reliable notebook that all brokers can read and write.
+>
+
+ZooKeeper:
+
+* stores metadata
+* detects liveness
+* provides coordination primitives
+
+ZooKeeper does NOT:
+
+* store messages
+* assign offsets
+* serve reads/writes
+* route traffic
+
+
+### What Kafka stores in ZooKeeper
+
+ZooKeeper stores only metadata, such as:
+
+**1. Broker liveness**
+
+Each broker creates an ephemeral node:
+
+```text
+/brokers/ids/1
+/brokers/ids/2
+```
+
+Ephemeral = auto-deleted if broker dies.
+
+
+**2. Partition metadata**
+
+For every partition:
+
+* leader broker
+* replica list
+* ISR (In-Sync Replicas)
+
+Example:
+
+```text
+Topic: orders
+Partition 0:
+Leader: Broker 1
+ISR: [Broker 1, Broker 2]
+```
+
+**3. Controller election**
+
+ZooKeeper ensures:
+
+> Only ONE controller exists at a time
+
+This is done using an ephemeral lock node.
+
+### ❌ What ZooKeeper never stores (very important)
+
+ZooKeeper does NOT store:
+
+* messages
+* offsets of messages
+* log files
+* consumer progress (modern Kafka)
+
+This separation is intentional.
+
+
+### Controller — What it REALLY is (ELI5)
+
+> The Controller is one Kafka broker elected to manage the cluster.
+
+There is:
+
+* exactly one active controller
+* others are standby
+
+### What the Controller DOES
+
+The controller is the decision-maker.
+
+**1. Leader election**
+
+If a broker fails:
+
+* controller chooses new partition leaders
+* only from ISR
+
+**2. Failure handling**
+
+When a broker goes down:
+
+* controller detects it (via ZooKeeper)
+* determines affected partitions
+* reassigns leadership
+
+**3. ISR maintenance**
+
+Controller:
+
+* removes lagging replicas from ISR
+* adds them back once caught up
+
+This is critical for **data safety**.
+
+
+**4. Metadata updates**
+
+Controller:
+
+* writes updated metadata to ZooKeeper
+* notifies brokers
+* producers & consumers refresh metadata
+
+
+### What the Controller does NOT do
+
+The controller:
+
+* ❌ does not handle client traffic
+* ❌ does not read/write messages
+* ❌ does not manage consumer offsets
+* ❌ does not sit in data path
+
+All data still flows directly between:
+
+
+```text
+Producer → Partition Leader
+Consumer → Partition Leader
+```
+
+
+### ZooKeeper vs Controller (mental model)
+
+| ZooKeeper       | Controller            |
+|-----------------|-----------------------|
+| Passive         | Active                |
+| Stores state    | Acts on state         |
+| No decisions    | Makes decisions       |
+| Highly reliable | Exactly one at a time |
+
+
+### End-to-End Failure Scenario (ELI5)
+
+**Scenario: Broker 1 crashes**
+
+Step 1: ZooKeeper notices
+
+* Broker 1's ephemeral node disappears
+* ZooKeeper records: "Broker 1 is gone"
+
+ZooKeeper **does not act**.
+
+
+Step 2: Controller reacts
+
+* Controller is watching ZooKeeper
+* Sees Broker 1 disappeared
+
+Controller now **takes control**.
+
+
+Step 3: Controller reassigns leaders
+
+For each affected partition:
+
+* looks at ISR
+* picks a new leader
+* updates metadata
+
+Example:
+
+```text
+Partition P0
+Old leader: Broker 1 (dead)
+ISR: [Broker 2, Broker 3]
+
+New leader → Broker 2
+```
+
+Step 4: System stabilizes
+
+* Brokers update metadata
+* Producers refresh leader info
+* Consumers resume reading safely
+
+No data loss if ISR rules were respected.
+
+
+### Why this design is GOOD (interview insight)
+
+Kafka separates concerns:
+
+* ZooKeeper → reliability, coordination
+* Controller → decision logic
+* Brokers → data storage
+
+This avoids:
+
+* bottlenecks
+* split-brain scenarios
+* complex distributed locking
+
+
+
+### Common Interview Traps (avoid these)
+
+* ❌ "ZooKeeper selects leaders"
+* ✔ Controller selects leaders
+
+
+* ❌ "ZooKeeper handles replication"
+* ✔ Brokers replicate data
+
+
+* ❌ "Controller handles reads/writes"
+* ✔ Leaders handle reads/writes
+
+
+### One-Sentence Summary (memorize)
+
+> ZooKeeper stores Kafka’s cluster metadata and detects failures, while the controller broker observes these changes 
+> and makes decisions such as leader election, ISR updates, and recovery actions.
+> 
+
+
+## Storing Metadata in ZooKeeper view
+
+Partition metadata is stored as key–value–like data and producers fetch it from brokers, not directly from ZooKeeper.
+
+
+### 1 How partition metadata is REALLY stored (ZooKeeper view)
+
+In ZooKeeper, Kafka stores metadata as hierarchical key–value nodes (znodes).
+
+Think of ZooKeeper as a distributed JSON tree.
+
+
+**Example: Topic orders, Partition 0**
+
+Example: Topic orders, Partition 0
+
+```text
+/brokers/topics/orders/partitions/0/state
+```
+
+Value stored at that path (the "value")
+
+```text
+{
+  "leader": 2,
+  "leader_epoch": 7,
+  "isr": [2, 3],
+  "replicas": [1, 2, 3]
+}
+```
+
+ELI5 meaning:
+
+* `leader`: 2 → Broker 2 accepts writes
+* `replicas` → where copies exist
+* `isr` → replicas trusted for safety
+* `leader_epoch` → versioning for correctness
+
+
+
+### 2. How broker liveness is stored
+
+Another concrete example.
+
+Broker registration
+
+```text
+/brokers/ids/2
+```
+
+Value:
+
+```text
+{
+  "host": "broker-2.kafka.local",
+  "port": 9092
+}
+```
+
+This node is ephemeral:
+
+* if broker 2 crashes → node disappears
+* ZooKeeper does not “decide”, it just reflects reality
+
+
+### 3. Where the Controller fits in (important)
+
+The controller broker:
+
+* watches these ZooKeeper paths
+* reacts to changes
+* updates metadata when needed
+
+Example:
+
+* broker 2 dies
+* /brokers/ids/2 disappears
+* controller:
+    * picks new leader from ISR
+    * updates /state node with new leader
+
+ZooKeeper stores state. Controller changes state
+
+
+### 4. Do producers read ZooKeeper directly?
+
+❌ NO — NEVER
+
+This is critical.
+
+> Producers and consumers NEVER talk to ZooKeeper.
+
+Reasons:
+
+* ZooKeeper is slow compared to brokers
+* would not scale
+* would become a bottleneck
+
+
+### 5. Then how does a producer find the leader?
+
+Step-by-step (this is interview gold)
+
+**Step 1: Producer connects to any broker**
+
+This is called a **bootstrap broker**.
+
+```text
+bootstrap.servers = broker1:9092,broker2:9092
+```
+
+**Step 2: Producer sends a Metadata Request**
+
+Example (conceptual):
+
+```text
+MetadataRequest:
+  topic = orders
+```
+
+**Step 3: Broker replies with metadata**
+
+Response includes:
+
+```text
+Topic: orders
+Partition 0 → Leader Broker 2
+Partition 1 → Leader Broker 3
+Partition 2 → Leader Broker 1
+```
+
+This metadata is served from:
+
+* broker's **local cache**
+* which was populated from ZooKeeper / KRaft
+
+
+**Step 4: Producer caches metadata locally**
+
+Producer now knows:
+
+* partition count
+* leader per partition
+* replica layout
+
+
+**Step 5: Producer writes directly to the leader**
+
+```text
+Producer → Broker 2 (leader of P0)
+```
+
+No ZooKeeper involved.
+
+
+### 6. What happens when leader changes?
+
+If a leader fails:
+
+1. Controller updates metadata in ZooKeeper
+2. Brokers update their local metadata cache
+3. Producer gets a write error
+4. Producer refreshes metadata
+5. Producer retries to new leader
+
+This is why Kafka clients are **metadata-aware**.
+
+
+### 7. Final mental model (lock this in)
+
+Storage
+
+* ZooKeeper = metadata key–value store
+* Example key:  
+        ```text
+        /brokers/topics/orders/partitions/0/state
+        ```
+* Example value:
+        ```text
+        leader, replicas, ISR  
+        ```
+
+Access
+
+* Brokers read/write ZooKeeper
+* Producers talk ONLY to brokers
+* Metadata flows:
+        ```text
+        ZooKeeper → Controller → Brokers → Producers
+        ```
+
+### One-sentence interview answer (memorize)
+
+> Partition metadata in Kafka is stored as hierarchical key–value data in ZooKeeper (or KRaft), but producers never 
+> read it directly; they fetch cached metadata from brokers and write straight to the partition leader.
+
+
+## What's the format of Log Files
+
+### 1. What is the actual format of partition log files?
+
+You already said:
+
+> Each partition is stored as an append-only log, split into segments.
+
+Now let's open the black box, but keep it simple.
+
+**1.1 Segment file structure (what’s inside segment-000128.log)**
+
+A segment file is **not just raw messages dumped one after another**.
+
+Conceptually, it looks like this:
+
+```text
+[ Record ][ Record ][ Record ] ...
+```
+
+Each record (simplified) contains:
+
+```text
+| Offset | Timestamp | Key | Value | Headers | CRC |
+```
+
+ELI5:
+
+* Offset → position in the partition
+* Key → used for partitioning & ordering
+* Value → actual message payload
+* CRC → corruption detection
+
+Offsets are **not stored as a separate table**. They are **embedded in the log records themselves**.
+
+
+**1.2 Supporting index files (important but simple)**
+
+For each `.log` file, Kafka also maintains:
+
+```text
+segment-000128.log
+segment-000128.index
+segment-000128.timeindex
+```
+
+What these do:
+
+* Offset index
+    Map:
+    ```text
+    offset → byte position in log file
+    ```
+    So Kafka can jump directly instead of scanning.
+* Time index
+    Map:
+    ```text
+    timestamp → offset
+    ```
+    Used for time-based reads and retention.
+
+ELI5 analogy:
+
+> Log file = book
+> Index file = table of contents
+>
+
+**1.3 Why no fancy data structures?**
+
+Kafka intentionally avoids:
+
+* B-Trees
+* Hash tables
+* Random writes
+
+Because:
+
+* sequential disk I/O is fastest
+* OS page cache does the heavy lifting
+* simplicity = reliability
+
+This aligns perfectly with your **append-only log** explanation.
+
+
+### 2. Where is the offset stored after a leader writes a message?
+
+This is a **very common interview confusion**, so clarity here is gold.
+
+**2.1 Offset assignment (what you already said, reinforced)**
+
+When a message arrives at the **leader**:
+
+1. Leader looks at its local log end offset
+2. Assigns:
+    ```text
+    next_offset = last_offset + 1
+    ```
+3. Appends the record to disk
+
+That offset is now **part of the log record itself**.
+
+There is no separate offset table.
+
+
+**2.2 Is offset metadata stored in ZooKeeper?**
+
+❌ No. Absolutely not.
+
+ZooKeeper **never stored offsets for messages**.
