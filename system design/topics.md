@@ -89,6 +89,8 @@
   * [Step 10: How D is eventually discovered (or marked dead)](#step-10-how-d-is-eventually-discovered-or-marked-dead)
   * [One-sentence corrected summary](#one-sentence-corrected-summary)
 * [Q-7 What are Vector Clocks?](#q-7-what-are-vector-clocks)
+* [Q-8 What are different cache eviction policies?](#q-8-what-are-different-cache-eviction-policies)
+* [Q-9 What are different Rate Limiting Algorithms?](#q-9-what-are-different-rate-limiting-algorithms)
 <!-- TOC -->
 
 # Q-1 What is Partition Tolerance?
@@ -1466,8 +1468,11 @@ In both cases, the system converges.
 A node starts with only addresses, learns about live peers incrementally through gossip exchanges, and builds 
 its membership view over multiple rounds—never instantly.
 
-
 # Q-7 What are Vector Clocks?
+
+# Q-8 What are different cache eviction policies?
+
+# Q-9 What are different Rate Limiting Algorithms?
 
 1. db isolation level
 1. normal forms
