@@ -646,7 +646,7 @@ If you do:
 DELETE(dog)
 ```
 
-LSM writes:
+The MemTable records a tombstone entry:
 
 ```text
 dog → TOMBSTONE
@@ -657,7 +657,7 @@ Later SSTable:
 ```text
 SSTable_3
 ---------
-dog → <deleted>
+dog → <tombstone>
 ```
 
 This hides old values.
