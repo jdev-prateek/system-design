@@ -98,6 +98,9 @@
 Partition Tolerance is the ability of a distributed system to survive a communications
 breakdown between its internal servers.
 
+
+
+
 # Q-2 What is CAP theorem?
 
 When a network partition happens, you must choose:
@@ -196,6 +199,10 @@ When the network is healthy:
 
 Neither is "better". They solve different problems.
 
+
+
+
+
 # Q-3 What are two common Replication Models?
 
 1. Primary–Replica (Leader–Follower)
@@ -259,6 +266,9 @@ Consistency story
 * If `R + W > N` → latest write is guaranteed
 * If not → stale reads possible
 
+
+
+
 # Q-4 How to tune consistency in Leaderless Replication
 
 In distributed systems (like Cassandra or DynamoDB), this specific formula (`R + W ≤ N`) means you
@@ -310,6 +320,10 @@ If you want to guarantee that your friend always sees "The sky is Green," you mu
 |:--------------|:----------------------------|:-----------------------------------------------------------------------------|:--------------------------------|
 | $R + W \le N$ | Weak / Eventual Consistency | The Read group and Write group might not overlap. Risk of stale data.        | High speed, Likes, Feed counts. |
 | $R + W > N$   | Strong Consistency          | The Read group and Write group are guaranteed to overlap. Always fresh data. | Passwords, Payments, Inventory. |
+
+
+
+
 
 # Q-5 What are Bloom Filters?
 
@@ -472,6 +486,10 @@ So Bloom Filters trade:
 
 * tiny uncertainty
 * for huge speed gains
+
+
+
+
 
 # Q-6 What are LSM Trees?
 
@@ -957,6 +975,8 @@ During compaction:
 
 
 
+
+
 # Q-8 What is Consistent hashing?
 
 Imagine you have 10,000 users and 3 servers.
@@ -1296,6 +1316,10 @@ Load redistribution is **even**.
 They are not an optimization.
 
 They are what makes consistent hashing usable in production.
+
+
+
+
 
 # Q-9 What is Gossip Protocol?
 
