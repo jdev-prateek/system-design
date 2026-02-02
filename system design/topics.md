@@ -701,6 +701,10 @@ LSM trades:
 
 > An LSM Tree stores new data in memory, writes it to disk as immutable sorted files, and later merges 
 > those files to keep reads fast.
+> 
+
+
+
 
 # Q-7 MemTable and SSTable: Structure and Layout
 
@@ -925,7 +929,12 @@ cat → TOMBSTONE
 **SSTable on disk**
 
 ```text
-SSTable on disk
+SSTable (on disk)
+-----------------
+apple → 10
+banana → 20
+cat → TOMBSTONE
+dog → 40
 ```
 
 
@@ -1495,3 +1504,11 @@ its membership view over multiple rounds—never instantly.
 
 
 1. use soft delete to delete rows or push the delete message to mq and delete later
+
+5. notification-system.md
+6. news-feed.md
+7. distributed-cache.md
+8. file-storage.md
+9. search-autocomplete.md
+10. logging-metrics.md
+11. payment-system.md
