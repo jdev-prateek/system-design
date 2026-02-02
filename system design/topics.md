@@ -1068,7 +1068,8 @@ zebra  → 90
 |            |                      |
 S1(10)       S2(40)                 S3(70)
 
-     apple(12)  cat(35)   dog(55)           zebra(90)
+ apple(12)          dog(55)                  zebra(90)
+      cat(35)
 ```
 
 ## Assign keys to shards (very important)
