@@ -93,7 +93,7 @@
     * [A merges replies](#a-merges-replies)
   * [10. Discovery continues (A meets B)](#10-discovery-continues-a-meets-b)
   * [11. Stable cluster view](#11-stable-cluster-view)
-* [FAILURE DETECTION (MOST IMPORTANT PART)](#failure-detection-most-important-part)
+  * [FAILURE DETECTION (MOST IMPORTANT PART)](#failure-detection-most-important-part)
   * [12. Node D crashes silently](#12-node-d-crashes-silently)
   * [13. A probes D](#13-a-probes-d)
   * [14. A marks D as SUSPECT](#14-a-marks-d-as-suspect)
@@ -1647,7 +1647,7 @@ All nodes converge to the same view.
 
 ---
 
-# FAILURE DETECTION (MOST IMPORTANT PART)
+## FAILURE DETECTION (MOST IMPORTANT PART)
 
 ---
 
@@ -1813,7 +1813,7 @@ D is removed from active membership.
 
 ---
 
-# NODE REVIVAL (WHY INCARNATION MATTERS)
+## NODE REVIVAL (WHY INCARNATION MATTERS)
 
 ---
 
