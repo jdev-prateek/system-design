@@ -107,7 +107,7 @@
   * [18. A marks D as DEAD](#18-a-marks-d-as-dead)
   * [19. Death information is gossiped](#19-death-information-is-gossiped)
   * [20. Cluster converges again](#20-cluster-converges-again)
-* [NODE REVIVAL (WHY INCARNATION MATTERS)](#node-revival-why-incarnation-matters)
+  * [NODE REVIVAL (WHY INCARNATION MATTERS)](#node-revival-why-incarnation-matters)
   * [21. D restarts](#21-d-restarts)
   * [22. D gossips ALIVE with higher incarnation](#22-d-gossips-alive-with-higher-incarnation)
   * [23. A compares incarnation](#23-a-compares-incarnation)
