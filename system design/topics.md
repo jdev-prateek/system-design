@@ -2,7 +2,7 @@
 * [Q-1 What is Partition Tolerance?](#q-1-what-is-partition-tolerance)
 * [Q-2 What is CAP theorem?](#q-2-what-is-cap-theorem)
   * [Why Partition Tolerance is mandatory](#why-partition-tolerance-is-mandatory)
-  * [Let’s see the choice (ELI5)](#lets-see-the-choice-eli5)
+  * [Let's see the choice (ELI5)](#lets-see-the-choice-eli5)
     * [Case 1: Choose Consistency](#case-1-choose-consistency)
     * [Case 2: Choose Availability](#case-2-choose-availability)
   * [Important correction (many people get this wrong)](#important-correction-many-people-get-this-wrong)
@@ -118,6 +118,51 @@
 * [Q-7 What are Vector Clocks?](#q-7-what-are-vector-clocks)
 * [Q-8 What are different cache eviction policies?](#q-8-what-are-different-cache-eviction-policies)
 * [Q-9 What are different Rate Limiting Algorithms?](#q-9-what-are-different-rate-limiting-algorithms)
+  * [The Problem: Why do we need this?](#the-problem-why-do-we-need-this)
+  * [Algorithm 1: Token Bucket](#algorithm-1-token-bucket)
+    * [1. The ELI5 Metaphor](#1-the-eli5-metaphor)
+    * [2. How it works (Step-by-Step)](#2-how-it-works-step-by-step)
+    * [3. Deep Dive: "Burstiness"](#3-deep-dive-burstiness)
+    * [Example](#example)
+  * [Algorithm 2: Leaky Bucket](#algorithm-2-leaky-bucket)
+    * [1. The ELI5 Metaphor](#1-the-eli5-metaphor-1)
+    * [2. How it works (Step-by-Step)](#2-how-it-works-step-by-step-1)
+    * [3. Deep Dive: The Trade-off](#3-deep-dive-the-trade-off)
+  * [Algorithm 3: Fixed Window Counter](#algorithm-3-fixed-window-counter)
+    * [1. The ELI5 Metaphor](#1-the-eli5-metaphor-2)
+    * [2. How it works (Step-by-Step)](#2-how-it-works-step-by-step-2)
+    * [3. Deep Dive: The "Edge of Window" Problem](#3-deep-dive-the-edge-of-window-problem)
+    * [Example - Where it works](#example---where-it-works-)
+      * [Step 1: **Calculate Window Key**](#step-1-calculate-window-key)
+      * [The formula](#the-formula)
+      * [Example (Real Numbers)](#example-real-numbers)
+        * [Case 1: Time = 10:00:12](#case-1-time--100012)
+        * [Case 2: Time = 10:00:59](#case-2-time--100059)
+        * [Case 3: Time = 10:01:00](#case-3-time--100100)
+      * [Why we do this](#why-we-do-this)
+      * [Step 2: **Get Counter**](#step-2-get-counter)
+      * [Redis key format](#redis-key-format)
+      * [What Redis Stores](#what-redis-stores)
+      * [What Happens on Each Request](#what-happens-on-each-request)
+        * [Example: Limit = 5 requests / minute](#example-limit--5-requests--minute)
+          * [Request #1 at 10:00:10](#request-1-at-100010)
+          * [Request #5 at 10:00:50](#request-5-at-100050)
+          * [Request #6 at 10:00:55](#request-6-at-100055)
+    * [Example - Where the Algorithm Breaks (Edge Case)](#example---where-the-algorithm-breaks-edge-case)
+      * [Timeline With Actual Keys](#timeline-with-actual-keys)
+        * [At 10:00:59](#at-100059)
+        * [At 10:01:00 (New Window)](#at-100100-new-window)
+        * [User sends 5 more requests at 10:01:01](#user-sends-5-more-requests-at-100101)
+      * [Result](#result)
+  * [Algorithm 4: Sliding Window Log](#algorithm-4-sliding-window-log)
+    * [1. The ELI5 Metaphor](#1-the-eli5-metaphor-3)
+    * [2. How it works (Step-by-Step)](#2-how-it-works-step-by-step-3)
+    * [3. Deep Dive: The Cost](#3-deep-dive-the-cost)
+  * [Algorithm 5: Sliding Window Counter (Hybrid)](#algorithm-5-sliding-window-counter-hybrid)
+    * [1. The ELI5 Metaphor](#1-the-eli5-metaphor-4)
+    * [2. How it works (Step-by-Step)](#2-how-it-works-step-by-step-4)
+    * [3. Deep Dive: Why this wins](#3-deep-dive-why-this-wins)
+  * [Summary Table (Quick Reference)](#summary-table-quick-reference)
 <!-- TOC -->
 
 # Q-1 What is Partition Tolerance?
@@ -159,7 +204,7 @@ Choose C or A
 
 Not all three.
 
-## Let’s see the choice (ELI5)
+## Let's see the choice (ELI5)
 
 ### Case 1: Choose Consistency
 
@@ -1861,6 +1906,485 @@ DEAD
 # Q-8 What are different cache eviction policies?
 
 # Q-9 What are different Rate Limiting Algorithms?
+
+## The Problem: Why do we need this?
+
+Imagine you own a popular coffee shop. If 1,000 people enter at the exact same second 
+and shout their orders, your baristas will collapse, and no coffee gets made.
+
+**Rate Limiting** is the bouncer at the door. It says: "I don't care how many of you are outside; 
+only 5 people can order per minute." This protects your server (the barista) from crashing under load.
+
+
+## Algorithm 1: Token Bucket
+
+**The Standard Choice (Used by AWS, Stripe)**
+
+### 1. The ELI5 Metaphor
+
+Imagine a bucket next to the door.
+
+* Every second, a magical hand drops 5 tokens into the bucket.
+* The bucket has a maximum size (capacity). If it's full, extra tokens spill over and are lost.
+* To enter the shop, a customer must grab 1 token from the bucket.
+* If the bucket is empty, the customer must wait (or go away).
+
+
+### 2. How it works (Step-by-Step)
+
+You track two things: `current_tokens` and `last_refill_timestamp`.
+
+On every request:
+
+1. Refill Calculation: Calculate how much time passed since the last request.
+    * `delta = now() - last_refill_timestamp`
+    * `new_tokens = delta * refill_rate`
+
+2. Update Bucket: Add `new_tokens` to the bucket, but cap it at `max_capacity`.
+
+    * `current_tokens = min(max_capacity, current_tokens + new_tokens)`
+    * `last_refill_timestamp = now()`
+   
+3. Check Request:
+    * If `current_tokens >= 1`: Subtract 1 token. Allow request.
+    * If `current_tokens < 1`: Reject request (HTTP 429).
+
+
+**Variable Definitions**
+
+| Variable                | Meaning                                |
+|-------------------------|----------------------------------------|
+| `now()`                 | Current time (seconds or milliseconds) |
+| `last_refill_timestamp` | Last time tokens were added            |
+| `delta`                 | Time elapsed since last refill         |
+| `refill_rate`           | Tokens added **per unit time**         |
+| `new_tokens`            | Tokens to add now                      |
+
+### 3. Deep Dive: "Burstiness"
+
+This algorithm allows bursts.
+
+* **Scenario:** The bucket sits idle for 1 hour. It fills up to `max_capacity` (say, 10 tokens).
+* **Action:** 10 users arrive at the exact same millisecond.
+* **Result:** All 10 get tokens immediately. The 11th user is blocked until the next refill.
+* **Why this matters:** It's great for user experience (letting users do quick bursts of activity) but 
+  potentially dangerous for your database if the burst is too large.
+
+### Example
+
+Assume:
+
+```text
+Bucket capacity = 10 tokens
+Refill rate = 2 tokens per second
+last_refill_timestamp = 100 seconds
+now() = 104 seconds
+```
+
+Here is the critical calculation:
+
+```text
+delta = now() - last_refill_timestamp
+new_tokens = delta * refill_rate
+```
+
+Translation:
+
+>
+> How much time has passed since we last added tokens, and based on that time, how 
+> many new tokens should we add to the bucket?
+>
+
+**Step 1: Calculate delta**
+
+```text
+delta = now - last_refill_timestamp
+delta = 104 - 100 = 4 seconds
+```
+
+**Meaning:**
+
+>
+> 4 seconds have passed since we last refilled.
+> 
+
+---
+
+**Step 2: Calculate new_tokens**
+
+```text
+new_tokens = delta * refill_rate
+new_tokens = 4 * 2 = 8 tokens
+```
+
+**Meaning:**
+
+>
+> In 4 seconds, the bucket earned 8 new tokens.
+> 
+
+---
+
+**Step 3: Add Tokens (With Capacity Check)**
+
+If current tokens = 3:
+
+```text
+tokens = min(capacity, current_tokens + new_tokens)
+tokens = min(10, 3 + 8)
+tokens = 10
+```
+
+Bucket is now full.
+
+---
+
+
+## Algorithm 2: Leaky Bucket
+
+**The Traffic Smoother (Used by NGINX)**
+
+### 1. The ELI5 Metaphor
+
+Imagine a bucket with a small hole in the bottom.
+
+* Requests enter the bucket from the top like water.
+* The bucket processes requests (drips them out the bottom) at a **constant speed**.
+* If the bucket is full (overflowing), new requests are discarded immediately.
+
+### 2. How it works (Step-by-Step)
+
+This is actually a **Queue (FIFO)**.
+
+1. **Request Arrives:** Check the queue size.
+2. **Check Capacity:**
+    * **If Queue is Full**: Reject request immediately.
+    * **If Queue has Space**: Add request to the queue.
+
+3. **Processing (Background Worker):**
+    * A separate process pulls requests from the queue at a fixed rate (e.g., 1 request every 200ms).
+
+
+### 3. Deep Dive: The Trade-off
+
+* **Advantage:** This smooths out traffic perfectly. Your database sees a steady stream, never a spike.
+* **Disadvantage:** **Latency**. If the bucket is nearly full, a new request sits in the queue waiting 
+  for everyone ahead of it to drip out. In real-time apps (like chat), this lag is unacceptable.
+
+---
+
+
+## Algorithm 3: Fixed Window Counter
+
+**The Simple but Flawed Approach**
+
+### 1. The ELI5 Metaphor
+
+You have a whiteboard with the current minute written on it (e.g., "10:00 AM").
+
+* Below it is a tally mark count.
+* When a customer enters, add a tally mark.
+* If the count hits the limit (e.g., 5), stop everyone.
+* When the clock hits "10:01 AM", erase the board and start over.
+
+### 2. How it works (Step-by-Step)
+
+1. **Calculate Window Key:** Get the current time window (e.g., `floor(timestamp / 60)`).
+2. **Get Counter:** Read the counter for that key (e.g., Redis key `user_123:10:00`).
+3. **Check:**
+    * **If count < Limit**: Increment counter. Allow.
+    * **If count >= Limit**: Reject.
+
+
+
+### 3. Deep Dive: The "Edge of Window" Problem
+
+This algorithm is dangerous because of **double bursts**.
+
+* *Limit:* 5 requests / minute.
+* *Scenario:* User makes 5 requests at `10:00:59`. Counter is 5. Allowed.
+* *Next:* Clock ticks to `10:01:00`. Counter resets to 0.
+* *Next:* User makes 5 requests at `10:01:01`. Counter is 5. Allowed.
+* *Result:* The user sent **10 requests in 2 seconds**. This defeats the purpose of rate limiting.
+
+
+### Example - Where it works 
+
+#### Step 1: **Calculate Window Key**
+
+> **Goal:** Convert continuous time into a discrete “bucket”.
+
+#### The formula
+
+```text
+window_key = floor(current_timestamp / window_size)
+```
+
+Where:
+
+* `current_timestamp` = current time in seconds (Unix time)
+* `window_size` = window length (60 seconds for 1 minute)
+
+---
+
+#### Example (Real Numbers)
+
+Assume:
+
+```text
+Window size = 60 seconds
+```
+
+##### Case 1: Time = 10:00:12
+
+Let’s say Unix time is:
+
+```text
+10:00:12 → 1,700,000,012 seconds
+```
+
+```text
+window_key = floor(1,700,000,012 / 60)
+           = floor(28,333,333.53)
+           = 28,333,333
+```
+
+This means:
+
+> “All requests between **10:00:00 and 10:00:59** belong to window `28,333,333`.”
+
+---
+
+##### Case 2: Time = 10:00:59
+
+```text
+window_key = floor(1,700,000,059 / 60)
+           = floor(28,333,334.31)
+           = 28,333,334
+```
+
+Still the **same window**.
+
+---
+
+##### Case 3: Time = 10:01:00
+
+```text
+window_key = floor(1,700,000,060 / 60)
+           = floor(28,333,334.33)
+           = 28,333,334
+```
+
+Now we have **a new window**.
+
+---
+
+#### Why we do this
+
+Because computers don’t think in “minutes” — they think in numbers.
+
+This calculation maps **wall-clock time → discrete counter key**.
+
+---
+
+#### Step 2: **Get Counter**
+
+> **Goal:** Track how many requests happened in this window.
+
+We store the count in Redis.
+
+#### Redis key format
+
+```text
+rate_limit:{user_id}:{window_key}
+```
+
+Example:
+
+```text
+rate_limit:user_123:28333333
+```
+
+---
+
+#### What Redis Stores
+
+```text
+rate_limit:user_123:28333333 = 4
+```
+
+Meaning:
+
+> User 123 has made **4 requests** in this time window.
+
+---
+
+#### What Happens on Each Request
+
+##### Example: Limit = 5 requests / minute
+
+###### Request #1 at 10:00:10
+
+```text
+counter = 0 → increment to 1 → ALLOW
+```
+
+###### Request #5 at 10:00:50
+
+```text
+counter = 4 → increment to 5 → ALLOW
+```
+
+###### Request #6 at 10:00:55
+
+```text
+counter = 5 → REJECT
+```
+
+So far, correct behavior.
+
+---
+
+### Example - Where the Algorithm Breaks (Edge Case)
+
+Let's replay your **double-burst** example using keys.
+
+---
+
+#### Timeline With Actual Keys
+
+##### At 10:00:59
+
+```text
+window_key = 28333333
+rate_limit:user_123:28333333 = 5
+```
+
+5 requests allowed.
+
+---
+
+##### At 10:01:00 (New Window)
+
+```text
+window_key = 28333334
+rate_limit:user_123:28333334 = 0
+```
+
+Counter resets **instantly**.
+
+---
+
+##### User sends 5 more requests at 10:01:01
+
+```text
+rate_limit:user_123:28333334 = 5
+```
+
+All allowed.
+
+---
+
+#### Result
+
+```text
+10 requests in ~2 seconds
+```
+
+Even though the limit was:
+
+```text
+5 requests / minute
+```
+
+---
+
+## Algorithm 4: Sliding Window Log
+
+**The "Perfect Accuracy" Approach**
+
+### 1. The ELI5 Metaphor
+
+The bouncer keeps a logbook of **every single timestamp** a person entered.
+
+* **Rule:** "No more than 5 entries in the last 60 seconds."
+* **Customer arrives:** The bouncer looks at the current time. They look back exactly 60 seconds 
+  in the logbook. They cross out (ignore) anything older than that. Then they count the remaining entries.
+* If the count < 5, write the new time and let them in.
+
+### 2. How it works (Step-by-Step)
+
+You store a **Sorted Set** of timestamps for every user.
+
+1. **Clean Up:** Remove all timestamps from the set that are older than `now - window_size`.
+2. **Count:** Count the number of elements remaining in the set.
+3. **Check:**
+    * **If Count < Limit**: Add `now` to the set. Allow.
+    * **If Count >= Limit**: Reject.
+
+
+
+### 3. Deep Dive: The Cost
+
+* **Accuracy:** 100%. It completely solves the "Edge of Window" problem.
+* **Performance:** Terrible at scale. If your limit is 1,000 requests/hour, you are storing and 
+  sorting 1,000 timestamps *per user* in Redis. This consumes massive memory and CPU.
+
+---
+
+## Algorithm 5: Sliding Window Counter (Hybrid)
+
+**The Industry Standard (Best of Both Worlds)**
+
+### 1. The ELI5 Metaphor
+
+You combine the whiteboard (Fixed Window) with some math to approximate the Log.
+
+* You look at the count for the **current minute** AND the **previous minute**.
+* You calculate a "weighted average" based on how far into the current minute you are.
+
+### 2. How it works (Step-by-Step)
+
+* **Limit:** 10 requests / minute.
+* **Current Time:** `10:01:15` (We are 25% into the current window).
+* **Scenario:**
+* Requests in `10:00` (Previous Window): 8
+* Requests in `10:01` (Current Window): 3
+
+
+**The Math:**
+We want to estimate how many requests happened in the *last rolling 60 seconds*.
+
+1. Assume requests in the previous window were evenly spread.
+2. Since we are 25% into the new window, **75%** of the previous window is still "relevant."
+3. **Formula:**
+
+    ```text
+    Weighted Count= (Previous Window Count * 0.75) + Current Window Count
+    
+    Weighted Count= (8 × 0.75) + 3 = 6 + 3 = 9
+    ```
+
+4. **Check:** . Allow request.
+
+### 3. Deep Dive: Why this wins
+
+* **Memory:** You only store 2 numbers (previous count, current count). Efficient like Fixed Window.
+* **Accuracy:** It solves the "Edge of Window" spike problem mathematically. It is not *perfectly* accurate (it assumes even distribution), but it's 99.9% good enough for production.
+
+---
+
+## Summary Table (Quick Reference)
+
+| Algorithm           | Pros                            | Cons                                    | Use Case                               |
+|---------------------|---------------------------------|-----------------------------------------|----------------------------------------|
+| **Token Bucket**    | Allows bursts; Memory efficient | Somewhat complex to implement correctly | **Standard API limiting** (AWS)        |
+| **Leaky Bucket**    | Smooths traffic perfectly       | Can introduce latency (queueing)        | **Background jobs** / packet switching |
+| **Fixed Window**    | Simplest to code; Low memory    | "Double burst" at window edges          | **Basic DDoS protection**              |
+| **Sliding Log**     | 100% Accurate                   | High memory cost; slow                  | **Low-volume, high-precision** limits  |
+| **Sliding Counter** | Balanced accuracy & efficiency  | Slightly complex math                   | **High-scale APIs** (Cloudflare)       |
+
+
 
 1. db isolation level
 1. normal forms
